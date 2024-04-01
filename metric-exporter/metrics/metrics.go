@@ -24,6 +24,7 @@ const (
 	rateLimitTypeLabel    = "rate_limit_type"    // rate-limit or no-rate-limit
 	ioPatternLabel        = "io_pattern"         // random or sequential
 	ioTypeLabel           = "io_type"            // read or write
+	volumeLabel           = "volume_name"
 )
 
 var (
@@ -65,7 +66,7 @@ func newMetricCollector(dataDir, volumeAccessMode, testMode, rateLimitType strin
 		desc: prometheus.NewDesc(
 			prometheus.BuildFQName(KbenchName, MetricExporterSubsystem, "iops"),
 			"Number of IO operations per second",
-			[]string{volumeAccessModeLabel, testModeLabel, rateLimitTypeLabel, ioPatternLabel, ioTypeLabel},
+			[]string{volumeAccessModeLabel, testModeLabel, rateLimitTypeLabel, ioPatternLabel, ioTypeLabel, volumeLabel},
 			nil,
 		),
 		metricType: prometheus.GaugeValue,
@@ -74,7 +75,7 @@ func newMetricCollector(dataDir, volumeAccessMode, testMode, rateLimitType strin
 		desc: prometheus.NewDesc(
 			prometheus.BuildFQName(KbenchName, MetricExporterSubsystem, "bandwidth"),
 			"Bandwidth in KiB/sec",
-			[]string{volumeAccessModeLabel, testModeLabel, rateLimitTypeLabel, ioPatternLabel, ioTypeLabel},
+			[]string{volumeAccessModeLabel, testModeLabel, rateLimitTypeLabel, ioPatternLabel, ioTypeLabel, volumeLabel},
 			nil,
 		),
 		metricType: prometheus.GaugeValue,
@@ -83,7 +84,7 @@ func newMetricCollector(dataDir, volumeAccessMode, testMode, rateLimitType strin
 		desc: prometheus.NewDesc(
 			prometheus.BuildFQName(KbenchName, MetricExporterSubsystem, "latency"),
 			"Latency in ns",
-			[]string{volumeAccessModeLabel, testModeLabel, rateLimitTypeLabel, ioPatternLabel, ioTypeLabel},
+			[]string{volumeAccessModeLabel, testModeLabel, rateLimitTypeLabel, ioPatternLabel, ioTypeLabel, volumeLabel},
 			nil,
 		),
 		metricType: prometheus.GaugeValue,
@@ -99,28 +100,30 @@ func (mc *metricCollector) Describe(ch chan<- *prometheus.Desc) {
 func (mc *metricCollector) Collect(ch chan<- prometheus.Metric) {
 	opsProcessed.Inc()
 
-	fioJobsMap, err := readAllFioJobs(mc.dataDir)
+	fioVolumeToJobsMap, err := readAllFioJobs(mc.dataDir)
 	if err != nil {
 		logrus.Errorf("Error during scrape: Failed to readAllFioJobs: %v", err)
 		return
 	}
 
-	for _, job := range fioJobsMap {
-		ioPattern, ioType, jobSuffix, err := parseJobName(job.Jobname)
-		if err != nil {
-			logrus.Errorf("Error during scrape: %v", err)
-			continue
-		}
+	for volumeName, jobs := range fioVolumeToJobsMap {
+		for _, job := range jobs {
+			ioPattern, ioType, jobSuffix, err := parseJobName(job.Jobname)
+			if err != nil {
+				logrus.Errorf("Error during scrape: %v", err)
+				continue
+			}
 
-		switch true {
-		case jobSuffix == "iops":
-			mc.collectIOPsMetric(ch, job, ioPattern, ioType)
-		case jobSuffix == "bw":
-			mc.collectBandwidthMetric(ch, job, ioPattern, ioType)
-		case jobSuffix == "lat":
-			mc.collectLatencyMetric(ch, job, ioPattern, ioType)
-		default:
-			logrus.Errorf("Error during scrape: unknown job: %v", job.Jobname)
+			switch true {
+			case jobSuffix == "iops":
+				mc.collectIOPsMetric(ch, job, ioPattern, ioType, volumeName)
+			case jobSuffix == "bw":
+				mc.collectBandwidthMetric(ch, job, ioPattern, ioType, volumeName)
+			case jobSuffix == "lat":
+				mc.collectLatencyMetric(ch, job, ioPattern, ioType, volumeName)
+			default:
+				logrus.Errorf("Error during scrape: unknown job: %v", job.Jobname)
+			}
 		}
 	}
 }
@@ -131,8 +134,9 @@ func InitMetricCollectorSystem(dataDir, volumeAccessMode, testMode, rateLimitTyp
 	registry.Register(metricCollector)
 }
 
-func readAllFioJobs(dataDir string) (fioJobsMap map[string]*types.FioJob, err error) {
-	fioJobsMap = make(map[string]*types.FioJob)
+func readAllFioJobs(dataDir string) (fioVolumeToJobsMap map[string][]*types.FioJob, err error) {
+	fioVolumeToJobsMap = make(map[string][]*types.FioJob)
+
 	defer func() {
 		err = errors.Wrap(err, "failed to readAllFioJobs")
 	}()
@@ -144,6 +148,7 @@ func readAllFioJobs(dataDir string) (fioJobsMap map[string]*types.FioJob, err er
 
 	for _, file := range files {
 		fileName := file.Name()
+		volumeName := getVolumeNameFromFileName(fileName)
 		filePath := filepath.Join(dataDir, fileName)
 
 		logrus.Debugf("reading %v", fileName)
@@ -154,12 +159,20 @@ func readAllFioJobs(dataDir string) (fioJobsMap map[string]*types.FioJob, err er
 			continue
 		}
 
-		for jobName, job := range jobs {
-			fioJobsMap[jobName] = job
+		for _, job := range jobs {
+			fioVolumeToJobsMap[volumeName] = append(fioVolumeToJobsMap[volumeName], job)
 		}
 
 	}
-	return fioJobsMap, nil
+	return fioVolumeToJobsMap, nil
+}
+
+func getVolumeNameFromFileName(fileName string) string {
+	strs := strings.Split(fileName, "-")
+	if len(strs) < 2 {
+		return ""
+	}
+	return strs[0]
 }
 
 func readFioJobsFromFile(filePath string) (fioJobsMap map[string]*types.FioJob, err error) {
@@ -220,7 +233,7 @@ func parseJobName(jobName string) (ioPattern, ioType, jobSuffix string, err erro
 
 }
 
-func (mc *metricCollector) collectIOPsMetric(ch chan<- prometheus.Metric, job *types.FioJob, ioPattern, ioType string) {
+func (mc *metricCollector) collectIOPsMetric(ch chan<- prometheus.Metric, job *types.FioJob, ioPattern, ioType, volName string) {
 	var value float64
 	if ioType == types.IOTypeRead {
 		value = job.Read.IopsMean
@@ -228,11 +241,11 @@ func (mc *metricCollector) collectIOPsMetric(ch chan<- prometheus.Metric, job *t
 		value = job.Write.IopsMean
 	}
 
-	ch <- prometheus.MustNewConstMetric(mc.iopsMetric.desc, mc.iopsMetric.metricType, value, mc.volumeAccessMode, mc.testMode, mc.rateLimitType, ioPattern, ioType)
+	ch <- prometheus.MustNewConstMetric(mc.iopsMetric.desc, mc.iopsMetric.metricType, value, mc.volumeAccessMode, mc.testMode, mc.rateLimitType, ioPattern, ioType, volName)
 	return
 }
 
-func (mc *metricCollector) collectBandwidthMetric(ch chan<- prometheus.Metric, job *types.FioJob, ioPattern, ioType string) {
+func (mc *metricCollector) collectBandwidthMetric(ch chan<- prometheus.Metric, job *types.FioJob, ioPattern, ioType, volName string) {
 	var value float64
 	if ioType == types.IOTypeRead {
 		value = job.Read.BwMean
@@ -240,11 +253,11 @@ func (mc *metricCollector) collectBandwidthMetric(ch chan<- prometheus.Metric, j
 		value = job.Write.BwMean
 	}
 
-	ch <- prometheus.MustNewConstMetric(mc.bandwidthMetric.desc, mc.bandwidthMetric.metricType, value, mc.volumeAccessMode, mc.testMode, mc.rateLimitType, ioPattern, ioType)
+	ch <- prometheus.MustNewConstMetric(mc.bandwidthMetric.desc, mc.bandwidthMetric.metricType, value, mc.volumeAccessMode, mc.testMode, mc.rateLimitType, ioPattern, ioType, volName)
 	return
 }
 
-func (mc *metricCollector) collectLatencyMetric(ch chan<- prometheus.Metric, job *types.FioJob, ioPattern, ioType string) {
+func (mc *metricCollector) collectLatencyMetric(ch chan<- prometheus.Metric, job *types.FioJob, ioPattern, ioType, volName string) {
 	var value float64
 
 	if ioType == types.IOTypeRead {
@@ -253,6 +266,6 @@ func (mc *metricCollector) collectLatencyMetric(ch chan<- prometheus.Metric, job
 		value = job.Write.LatNs.Mean
 	}
 
-	ch <- prometheus.MustNewConstMetric(mc.latencyMetric.desc, mc.latencyMetric.metricType, value, mc.volumeAccessMode, mc.testMode, mc.rateLimitType, ioPattern, ioType)
+	ch <- prometheus.MustNewConstMetric(mc.latencyMetric.desc, mc.latencyMetric.metricType, value, mc.volumeAccessMode, mc.testMode, mc.rateLimitType, ioPattern, ioType, volName)
 	return
 }

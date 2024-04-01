@@ -1,0 +1,173 @@
+# Long-running test with prometheus metric exporter to monitor the data
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: pvc-1
+spec:
+  volumeMode: Filesystem
+  storageClassName: longhorn  # replace with your storage class
+  accessModes:
+    - ReadWriteMany
+  resources:
+    requests:
+      storage: 2Gi
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: pvc-2
+spec:
+  volumeMode: Filesystem
+  storageClassName: longhorn
+  accessModes:
+    - ReadWriteMany
+  resources:
+    requests:
+      storage: 4Gi
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: pvc-3
+spec:
+  volumeMode: Filesystem
+  storageClassName: longhorn
+  accessModes:
+    - ReadWriteMany
+  resources:
+    requests:
+      storage: 40Gi
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: test-workload
+  namespace: default
+  labels:
+    app: test-workload
+spec:
+  selector:
+    app: test-workload
+  ports:
+    - name: http
+      port: 80
+      targetPort: metrics
+---
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: test-workload
+  namespace: default
+spec:
+  serviceName: test-workload
+  replicas: 1
+  selector:
+    matchLabels:
+      app: test-workload
+  podManagementPolicy: Parallel
+  template:
+    metadata:
+      labels:
+        app: test-workload
+    spec:
+      nodeName: photon-02 # Replace this one by one of the node in your cluster to force all pods of this workload on that node
+      containers:
+        - name: kbench-1
+          image: phanle1010/kbench:broadcom
+          imagePullPolicy: IfNotPresent
+          command: ["sleep", "36000000"]
+          volumeMounts:
+            - name: pvc1
+              mountPath: /pvc1/
+            - name: shared-data
+              mountPath: /test-result
+        - name: kbench-2
+          image: phanle1010/kbench:broadcom
+          imagePullPolicy: Always
+          command: ["sleep", "36000000"]
+          volumeMounts:
+            - name: pvc2
+              mountPath: /pvc2/
+            - name: shared-data
+              mountPath: /test-result
+        - name: kbench-3
+          image: phanle1010/kbench:broadcom
+          imagePullPolicy: Always
+          env:
+            - name: MODE
+              value: "random-read-latency"
+            - name: OUTPUT
+              value: /test-result/pvc3
+            - name: FILE_NAME
+              value: "/pvc3/test.img"
+            - name: SIZE
+              value: "32768M" # 80% of the pvc-3's size
+            - name: CPU_IDLE_PROF
+              value: "disabled"
+            - name: SKIP_PARSE
+              value: "true"
+            - name: LONG_RUN
+              value: "true"
+          volumeMounts:
+            - name: pvc3
+              mountPath: /pvc3/
+            - name: shared-data
+              mountPath: /test-result
+        - name: metric-exporter
+          image: phanle1010/kbench:broadcom
+          imagePullPolicy: Always
+          readinessProbe:
+            exec:
+              command:
+                - sh
+                - -c
+                - '[ "$(ls -A /test-result)" ]'
+            initialDelaySeconds: 30
+            periodSeconds: 5
+          command:
+            - metric-exporter
+            - -d
+            - start
+          env:
+            - name: DATA_DIR
+              value: /test-result
+            - name: VOLUME_ACCESS_MODE
+              value: rwx
+            - name: TEST_MODE
+              value: read-only
+            - name: RATE_LIMIT_TYPE
+              value: rate-limit
+          ports:
+            - containerPort: 8080
+              name: metrics
+          volumeMounts:
+            - name: shared-data
+              mountPath: /test-result
+      volumes:
+        - name: shared-data
+          emptyDir: {}
+        - name: pvc1
+          persistentVolumeClaim:
+            claimName: pvc-1
+        - name: pvc2
+          persistentVolumeClaim:
+            claimName: pvc-2
+        - name: pvc3
+          persistentVolumeClaim:
+            claimName: pvc-3
+---
+apiVersion: monitoring.coreos.com/v1
+kind: ServiceMonitor
+metadata:
+  name: test-workload-servicemonitor
+  namespace: default
+spec:
+  selector:
+    matchLabels:
+      app: test-workload
+  namespaceSelector:
+    matchNames:
+      - default
+  endpoints:
+    - port: http
+      interval: 30s

@@ -71,6 +71,7 @@ type FioJob struct {
 	//} `json:"job options"`
 	JobRuntime   int64  `json:"job_runtime"`
 	Jobname      string `json:"jobname"`
+	VolumeName   string `json:"volumeName"`
 	LatencyDepth int64  `json:"latency_depth"`
 	//LatencyMs    struct {
 	//	One0          int64   `json:"10"`

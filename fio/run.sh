@@ -78,13 +78,13 @@ case $MODE in
     ;;
   "random-read-latency")
     IOPS_FIO=""
-    BW_FIO="latency-random-read.fio"
-    LAT_FIO=""
+    BW_FIO=""
+    LAT_FIO="latency-random-read.fio"
     ;;
   "sequential-read-latency")
     IOPS_FIO=""
-    BW_FIO="latency-sequential-read.fio"
-    LAT_FIO=""
+    BW_FIO=""
+    LAT_FIO="latency-sequential-read.fio"
     ;;
   "random-write-iops")
     IOPS_FIO="iops-random-write.fio"
@@ -97,24 +97,24 @@ case $MODE in
     LAT_FIO=""
     ;;
   "random-write-bandwidth")
-    IOPS_FIO="bandwidth-random-write.fio"
-    BW_FIO=""
+    IOPS_FIO=""
+    BW_FIO="bandwidth-random-write.fio"
     LAT_FIO=""
     ;;
   "sequential-write-bandwidth")
-    IOPS_FIO="bandwidth-sequential-write.fio"
-    BW_FIO=""
+    IOPS_FIO=""
+    BW_FIO="bandwidth-sequential-write.fio"
     LAT_FIO=""
     ;;
   "random-write-latency")
     IOPS_FIO=""
-    BW_FIO="latency-random-write.fio"
-    LAT_FIO=""
+    BW_FIO=""
+    LAT_FIO="latency-random-write.fio"
     ;;
   "sequential-write-latency")
     IOPS_FIO=""
-    BW_FIO="latency-sequential-write.fio"
-    LAT_FIO=""
+    BW_FIO=""
+    LAT_FIO="latency-sequential-write.fio"
     ;;
   "full" | "")
     IOPS_FIO="iops.fio"

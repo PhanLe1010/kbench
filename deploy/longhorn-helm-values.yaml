@@ -1,0 +1,15 @@
+defaultSettings:
+  # This follow the best practice for dedicated disk https://longhorn.io/docs/1.6.1/best-practices/#minimal-available-storage-and-over-provisioning
+  storageOverProvisioningPercentage: 100
+  storageMinimalAvailablePercentage: 10
+  # This follows the best practice at https://longhorn.io/docs/1.6.1/best-practices/#allow-volume-creation-with-degraded-availability
+  allowVolumeCreationWithDegradedAvailability: false
+  # Longhorn will use storage at this location on the host by default
+  defaultDataPath: "/longhorn/"
+# We discovered a recent upstream nfs-ganesha bug which could make nfs mount frozen. We fixed it in the upcomming Longhorn v1.6.2 release.
+# In the meantime, you can use this image as temporary workaround. See more details at https://github.com/longhorn/longhorn/issues/8253
+image:
+   longhorn:
+      shareManager:
+         repository: phanle1010/longhorn-share-manager
+         tag: v1.6.1-fixed-nfs-frozen
