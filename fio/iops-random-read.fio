@@ -1,4 +1,5 @@
 [rand-read-iops]
 readwrite=randread
+numjobs=16
 include iops-include.fio
 include common-include.fio

@@ -1,2 +1,2 @@
 bs=128k
-iodepth=64
+iodepth=16

@@ -1,4 +1,5 @@
 [rand-read-lat]
 readwrite=randread
+numjobs=1
 include lat-include.fio
 include common-include.fio

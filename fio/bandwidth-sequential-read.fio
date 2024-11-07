@@ -1,4 +1,5 @@
 [seq-read-bw]
 readwrite=read
+numjobs=16
 include bw-include.fio
 include common-include.fio
